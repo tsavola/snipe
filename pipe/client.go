@@ -19,7 +19,7 @@ import (
 const Usage = `Usage: %s <public-name>:<public-port> <private-addr>:<private-port> [<private-tls-name>]]
 `
 
-func Main(proxyAddr string) (exitCode int) {
+func Main(proxyAddr string, proxyTLS *tls.Config) (exitCode int) {
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 
 	flag.Usage = func() {
@@ -51,7 +51,7 @@ func Main(proxyAddr string) (exitCode int) {
 		return 2
 	}
 
-	if err := Client(proxyAddr, src, dest, name); err != nil {
+	if err := Client(proxyAddr, proxyTLS, src, dest, name); err != nil {
 		log.Print(err)
 		return 1
 	}
@@ -64,7 +64,7 @@ type bufConn struct {
 	io.Writer
 }
 
-func Client(proxyAddr, publicAddr, localAddr, localTLSServerName string) error {
+func Client(proxyAddr string, proxyTLS *tls.Config, publicAddr, localAddr, localTLSServerName string) error {
 	if len(publicAddr) > 255 {
 		panic(publicAddr)
 	}
@@ -73,9 +73,9 @@ func Client(proxyAddr, publicAddr, localAddr, localTLSServerName string) error {
 	request[1] = byte(len(publicAddr))
 	request = append(request, publicAddr...)
 
-	var tlsConfig *tls.Config
+	var localTLS *tls.Config
 	if localTLSServerName != "" {
-		tlsConfig = &tls.Config{
+		localTLS = &tls.Config{
 			ServerName:         localTLSServerName,
 			InsecureSkipVerify: true,
 		}
@@ -84,13 +84,13 @@ func Client(proxyAddr, publicAddr, localAddr, localTLSServerName string) error {
 	var i uint64
 	for {
 		i++
-		if err := connect(i, proxyAddr, request, localAddr, tlsConfig); err != nil {
+		if err := connect(i, proxyAddr, proxyTLS, request, localAddr, localTLS); err != nil {
 			return err
 		}
 	}
 }
 
-func connect(num uint64, proxyAddr string, request []byte, localAddr string, tlsConfig *tls.Config) error {
+func connect(num uint64, proxyAddr string, proxyTLS *tls.Config, request []byte, localAddr string, localTLS *tls.Config) error {
 	log.Printf("%6d: offering", num)
 
 	proxyConn, err := net.Dial("tcp", proxyAddr)
@@ -102,6 +102,10 @@ func connect(num uint64, proxyAddr string, request []byte, localAddr string, tls
 			proxyConn.Close()
 		}
 	}()
+
+	if proxyTLS != nil {
+		proxyConn = tls.Client(proxyConn, proxyTLS)
+	}
 
 	if _, err := proxyConn.Write(request); err != nil {
 		return err
@@ -129,24 +133,24 @@ func connect(num uint64, proxyAddr string, request []byte, localAddr string, tls
 		}
 	}()
 
-	if tlsConfig != nil {
-		local = tls.Client(local, tlsConfig)
+	if localTLS != nil {
+		local = tls.Client(local, localTLS)
 	}
 
 	log.Printf("%6d: connected", num)
 
-	go transfer(num, proxyRead, proxyConn.(*net.TCPConn), local.(localConn))
+	go transfer(num, proxyRead, proxyConn.(conn), local.(conn))
 	proxyConn = nil
 	local = nil
 	return nil
 }
 
-type localConn interface {
+type conn interface {
 	io.ReadWriteCloser
 	CloseWrite() error
 }
 
-func transfer(num uint64, proxyRead io.Reader, proxyConn *net.TCPConn, local localConn) error {
+func transfer(num uint64, proxyRead io.Reader, proxyConn, local conn) error {
 	defer local.Close()
 	defer proxyConn.Close()
 

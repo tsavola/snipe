@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/tsavola/mu"
 )
@@ -22,9 +23,11 @@ import (
 const (
 	socketDir  = "/run/snipe"
 	socketFile = socketDir + "/pipe.sock"
+
+	publicHandshakeTimeout = time.Second * 5
 )
 
-func Server(ctx context.Context, domain string, tlsConfig *tls.Config) error {
+func Server(ctx context.Context, domain string, publicTLS, intraTLS *tls.Config) error {
 	defer func() {
 		if x := recover(); x != nil {
 			Err.Printf("panic: %v", x)
@@ -33,9 +36,10 @@ func Server(ctx context.Context, domain string, tlsConfig *tls.Config) error {
 	}()
 
 	s := &server{
-		tls:    tlsConfig,
-		suffix: "." + domain,
-		ports:  make(map[int]map[string]func(*tls.Conn)),
+		suffix:    "." + domain,
+		publicTLS: publicTLS,
+		intraTLS:  intraTLS,
+		ports:     make(map[int]map[string]func(*tls.Conn)),
 	}
 	s.cond.L = &s.mu
 
@@ -48,11 +52,13 @@ func Server(ctx context.Context, domain string, tlsConfig *tls.Config) error {
 }
 
 type server struct {
-	mu     mu.Mutex
-	tls    *tls.Config
-	suffix string
-	ports  map[int]map[string]func(*tls.Conn)
-	cond   sync.Cond
+	suffix    string
+	publicTLS *tls.Config
+	intraTLS  *tls.Config
+
+	mu    mu.Mutex
+	ports map[int]map[string]func(*tls.Conn)
+	cond  sync.Cond
 }
 
 func (s *server) serve(ctx context.Context) error {
@@ -79,7 +85,6 @@ func (s *server) serve(ctx context.Context) error {
 	for {
 		private, err := l.Accept()
 		if err != nil {
-			Info.Printf("accept client: %v", err)
 			if errors.Is(err, context.Canceled) || atomic.LoadUint32(&done) == 1 {
 				err = nil
 			}
@@ -88,15 +93,24 @@ func (s *server) serve(ctx context.Context) error {
 
 		Info.Printf("accepted private connection")
 
+		if s.intraTLS != nil {
+			private = tls.Server(private, s.intraTLS)
+		}
+
 		go func() {
-			if err := s.handle(private.(*net.UnixConn)); err != nil {
+			if err := s.handle(private.(intraConn)); err != nil {
 				Err.Printf("handle: %v", err)
 			}
 		}()
 	}
 }
 
-func (s *server) handle(private *net.UnixConn) error {
+type intraConn interface {
+	net.Conn
+	CloseWrite() error
+}
+
+func (s *server) handle(private intraConn) error {
 	closePrivate := true
 	defer func() {
 		if closePrivate {
@@ -175,7 +189,7 @@ func (s *server) handle(private *net.UnixConn) error {
 }
 
 func (s *server) listen(port int, names map[string]func(*tls.Conn)) error {
-	l, err := tls.Listen("unix", fmt.Sprintf("%s/%d.sock", socketDir, port), s.tls)
+	l, err := tls.Listen("unix", fmt.Sprintf("%s/%d.sock", socketDir, port), s.publicTLS)
 	if err != nil {
 		return err
 	}
@@ -192,11 +206,11 @@ func (s *server) listenLoop(port int, l net.Listener, names map[string]func(*tls
 	for {
 		public, err := l.Accept()
 		if err != nil {
-			Info.Printf("accept public: %v", err)
+			Err.Printf("accept: %v", err)
 			return
 		}
 
-		Info.Printf("public connection accepted for port %d", port)
+		Info.Printf("public connection to port %d accepted", port)
 
 		go s.forward(port, public.(*tls.Conn), names)
 	}
@@ -205,12 +219,20 @@ func (s *server) listenLoop(port int, l net.Listener, names map[string]func(*tls
 func (s *server) forward(port int, public *tls.Conn, names map[string]func(*tls.Conn)) {
 	defer public.Close()
 
+	if err := public.SetDeadline(time.Now().Add(publicHandshakeTimeout)); err != nil {
+		panic(err)
+	}
+
 	if err := public.Handshake(); err != nil {
 		Info.Printf("public port %d handshake: %v", port, err)
 		return
 	}
 
 	name := public.ConnectionState().ServerName
+
+	if err := public.SetDeadline(time.Time{}); err != nil {
+		panic(err)
+	}
 
 	var f func(*tls.Conn)
 
@@ -232,7 +254,7 @@ func (s *server) forward(port int, public *tls.Conn, names map[string]func(*tls.
 
 // transfer data bidirectionally unless public connection is nil.  Private
 // connection will be closed in any case.
-func transfer(private *net.UnixConn, public *tls.Conn) {
+func transfer(private intraConn, public *tls.Conn) {
 	defer private.Close()
 
 	if public == nil {

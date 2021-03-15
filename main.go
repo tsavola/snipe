@@ -14,7 +14,7 @@ import (
 	"syscall"
 )
 
-func Main(domain string, tls *tls.Config) (exitCode int) {
+func Main(domain string, publicTLS, intraTLS *tls.Config) (exitCode int) {
 	flag.Parse()
 	if flag.NArg() != 0 {
 		flag.Usage()
@@ -24,7 +24,7 @@ func Main(domain string, tls *tls.Config) (exitCode int) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer cancel()
 
-	if err := Server(ctx, domain, tls); err != nil {
+	if err := Server(ctx, domain, publicTLS, intraTLS); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
