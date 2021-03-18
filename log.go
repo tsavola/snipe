@@ -7,6 +7,8 @@ package snipe
 import (
 	"fmt"
 	"log/syslog"
+
+	"github.com/coreos/go-systemd/v22/journal"
 )
 
 type Logger interface {
@@ -19,14 +21,29 @@ var (
 )
 
 func init() {
-	w, err := syslog.Dial("unixgram", "/dev/log", syslog.LOG_DAEMON, "snipe")
-	if err != nil {
-		panic(err)
-	}
+	if journal.Enabled() {
+		Err = errJournal{}
+		Info = infoJournal{}
 
-	Err = errLogger{w}
-	Info = infoLogger{w}
+		Info.Printf("logging to journal")
+	} else {
+		w, err := syslog.Dial("unixgram", "/dev/log", syslog.LOG_DAEMON, "snipe")
+		if err != nil {
+			panic(err)
+		}
+
+		Err = errLogger{w}
+		Info = infoLogger{w}
+
+		Info.Printf("logging to syslog")
+	}
 }
+
+type errJournal struct{}
+type infoJournal struct{}
+
+func (errJournal) Printf(f string, a ...interface{})  { journal.Print(journal.PriErr, f, a...) }
+func (infoJournal) Printf(f string, a ...interface{}) { journal.Print(journal.PriInfo, f, a...) }
 
 type errLogger struct{ *syslog.Writer }
 type infoLogger struct{ *syslog.Writer }
