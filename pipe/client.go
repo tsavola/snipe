@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 )
 
 const Usage = `Usage: %s <public-name>:<public-port> <private-addr>:<private-port> [<private-tls-name>]]
@@ -90,6 +91,8 @@ func Client(proxyAddr string, proxyTLS *tls.Config, publicAddr, localAddr, local
 	}
 }
 
+const offerTimeout = time.Second * 45
+
 func connect(num uint64, proxyAddr string, proxyTLS *tls.Config, request []byte, localAddr string, localTLS *tls.Config) error {
 	log.Printf("%6d: offering", num)
 
@@ -107,14 +110,22 @@ func connect(num uint64, proxyAddr string, proxyTLS *tls.Config, request []byte,
 		proxyConn = tls.Client(proxyConn, proxyTLS)
 	}
 
+	if err := proxyConn.SetDeadline(time.Now().Add(offerTimeout)); err != nil {
+		panic(err)
+	}
+
 	if _, err := proxyConn.Write(request); err != nil {
 		return err
 	}
 
 	proxyRead := bufio.NewReader(proxyConn)
 	if _, err := proxyRead.ReadByte(); err != nil {
-		if err == io.EOF {
+		switch {
+		case err == io.EOF:
 			log.Printf("%6d: dropped", num)
+			err = nil
+		case errors.Is(err, os.ErrDeadlineExceeded):
+			log.Printf("%6d: timed out", num)
 			err = nil
 		}
 		return err
