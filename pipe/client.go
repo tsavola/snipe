@@ -119,29 +119,29 @@ func connect(num uint64, proxyAddr string, proxyTLS *tls.Config, request []byte,
 		}
 		return err
 	}
-	if err := proxyRead.UnreadByte(); err != nil {
-		panic(err)
-	}
 
-	local, err := net.Dial("tcp", localAddr)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if local != nil {
-			local.Close()
+	go func(proxyConn net.Conn) {
+		defer proxyConn.Close()
+
+		if err := proxyRead.UnreadByte(); err != nil {
+			panic(err)
 		}
-	}()
 
-	if localTLS != nil {
-		local = tls.Client(local, localTLS)
-	}
+		local, err := net.Dial("tcp", localAddr)
+		if err != nil {
+			log.Printf("%6d: error: %v", num, err)
+			return
+		}
+		if localTLS != nil {
+			local = tls.Client(local, localTLS)
+		}
+		defer local.Close()
 
-	log.Printf("%6d: connected", num)
+		log.Printf("%6d: connected", num)
 
-	go transfer(num, proxyRead, proxyConn.(conn), local.(conn))
+		transfer(num, proxyRead, proxyConn.(conn), local.(conn))
+	}(proxyConn)
 	proxyConn = nil
-	local = nil
 	return nil
 }
 
@@ -151,9 +151,6 @@ type conn interface {
 }
 
 func transfer(num uint64, proxyRead io.Reader, proxyConn, local conn) error {
-	defer local.Close()
-	defer proxyConn.Close()
-
 	done1 := make(chan struct{})
 	done2 := make(chan struct{})
 
