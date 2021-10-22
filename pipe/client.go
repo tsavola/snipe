@@ -14,10 +14,15 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"time"
 )
 
-const Usage = `Usage: %s <public-name>:<public-port> <private-addr>:<private-port> [<private-tls-name>]]
+const Usage = `Usage: %s <public-name>[:<port>] <private-addr>[:<port>] [<private-tls-name>]]
+
+Ports default to 443.  When a port is not specified with the private
+address, the private TLS name defaults to the private address.
+
 `
 
 func Main(proxyAddr string, proxyTLS *tls.Config) (exitCode int) {
@@ -50,6 +55,20 @@ func Main(proxyAddr string, proxyTLS *tls.Config) (exitCode int) {
 	if !ok {
 		flag.Usage()
 		return 2
+	}
+
+	if !strings.Contains(src, ":") {
+		src += ":443"
+	}
+
+	if _, _, err := net.SplitHostPort(dest); err != nil {
+		d := dest + ":443"
+		if _, _, err := net.SplitHostPort(d); err == nil {
+			if name == "" {
+				name = dest
+			}
+			dest = d
+		}
 	}
 
 	if err := Client(proxyAddr, proxyTLS, src, dest, name); err != nil {
