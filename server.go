@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -189,12 +190,23 @@ func (s *server) handle(private intraConn) error {
 }
 
 func (s *server) listen(port int, names map[string]func(*tls.Conn)) error {
-	l, err := tls.Listen("unix", fmt.Sprintf("%s/%d.sock", socketDir, port), s.publicTLS)
+	c := s.publicTLS.Clone()
+	if port == 443 {
+		c.NextProtos = append([]string{"http/1.1"}, c.NextProtos...)
+	} else {
+		c.NextProtos = nil
+	}
+
+	l, err := tls.Listen("unix", fmt.Sprintf("%s/%d.sock", socketDir, port), c)
 	if err != nil {
 		return err
 	}
 
-	Info.Printf("listening at public port %d", port)
+	if len(c.NextProtos) == 0 {
+		Info.Printf("listening at public port %d (no ALPN)", port)
+	} else {
+		Info.Printf("listening at public port %d (%s)", port, strings.Join(c.NextProtos, " "))
+	}
 
 	go s.listenLoop(port, l, names)
 	return nil
