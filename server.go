@@ -18,12 +18,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tsavola/mu"
+	proxyproto "github.com/pires/go-proxyproto"
+	"import.name/lock"
 )
 
 const (
 	socketDir  = "/run/snipe"
 	socketFile = socketDir + "/pipe.sock"
+
+	portOffset = 10000
 
 	publicHandshakeTimeout = time.Second * 5
 )
@@ -57,7 +60,7 @@ type server struct {
 	publicTLS *tls.Config
 	intraTLS  *tls.Config
 
-	mu    mu.Mutex
+	mu    sync.Mutex
 	ports map[int]map[string]func(*tls.Conn)
 	cond  sync.Cond
 }
@@ -158,7 +161,7 @@ func (s *server) handle(private intraConn) error {
 		oldFunc func(*tls.Conn)
 	)
 
-	s.mu.Guard(func() {
+	lock.Guard(&s.mu, func() {
 		names := s.ports[port]
 		if names == nil {
 			names = make(map[string]func(*tls.Conn))
@@ -197,10 +200,17 @@ func (s *server) listen(port int, names map[string]func(*tls.Conn)) error {
 		c.NextProtos = nil
 	}
 
-	l, err := tls.Listen("unix", fmt.Sprintf("%s/%d.sock", socketDir, port), c)
+	l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", portOffset+port))
 	if err != nil {
 		return err
 	}
+
+	l = &proxyproto.Listener{
+		Listener:          l,
+		ReadHeaderTimeout: -1,
+	}
+
+	l = tls.NewListener(l, c)
 
 	if len(c.NextProtos) == 0 {
 		Info.Printf("listening at public port %d (no ALPN)", port)
@@ -222,7 +232,7 @@ func (s *server) listenLoop(port int, l net.Listener, names map[string]func(*tls
 			return
 		}
 
-		Info.Printf("public connection to port %d accepted", port)
+		Info.Printf("public connection to port %d accepted from %s", port, public.RemoteAddr())
 
 		go s.forward(port, public.(*tls.Conn), names)
 	}
@@ -248,7 +258,7 @@ func (s *server) forward(port int, public *tls.Conn, names map[string]func(*tls.
 
 	var f func(*tls.Conn)
 
-	s.mu.Guard(func() {
+	lock.Guard(&s.mu, func() {
 		for {
 			f = names[name]
 			if f != nil {

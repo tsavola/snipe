@@ -1,5 +1,7 @@
 github.com/coreos/go-systemd/v22 v22.2.0 h1:BBmbNtSc5PuUM3Byxs7yE5rLdxQO4/FMoEXY5Rle4GA=
 github.com/coreos/go-systemd/v22 v22.2.0/go.mod h1:xO0FLkIi5MaZafQlIrOotqXZ90ih+1atmu1JpKERPPk=
 github.com/godbus/dbus/v5 v5.0.3/go.mod h1:xhWf0FNVPg57R7Z0UbKHbJfkEywrmjJnf7w5xrFpKfA=
-github.com/tsavola/mu v1.1.0 h1:ASXrJeSkZy7gePKCy5rmfR3A2Zn5gg03aHa5Kn8GH9s=
-github.com/tsavola/mu v1.1.0/go.mod h1:uh+UOPcLhbDz4XoMmPg0/9Rl7BCIV0snqUWQEgZrSXc=
+github.com/pires/go-proxyproto v0.6.1 h1:EBupykFmo22SDjv4fQVQd2J9NOoLPmyZA/15ldOGkPw=
+github.com/pires/go-proxyproto v0.6.1/go.mod h1:Odh9VFOZJCf9G8cLW5o435Xf1J95Jw9Gw5rnCjcwzAY=
+import.name/lock v0.0.0-20211205191324-f24933776f0b h1:BGZe3RGI6lRASOz5fdX9i00k9f5BXdWMG4DG7qohCAY=
+import.name/lock v0.0.0-20211205191324-f24933776f0b/go.mod h1:A/P+1darHq1WWQZaqhNcXx0mdLynmjtDPIu6g0ZxuX8=
