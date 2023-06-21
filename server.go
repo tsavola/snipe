@@ -11,24 +11,21 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/coreos/go-systemd/v22/daemon"
 	"import.name/lock"
 )
 
 const (
-	socketDir  = "/run/snipe"
-	socketFile = socketDir + "/pipe.sock"
-
 	publicHandshakeTimeout = time.Second * 5
 )
 
-func Server(ctx context.Context, domain string, publicTLS, intraTLS *tls.Config) error {
+func Server(ctx context.Context, domain string, publicTLS *tls.Config, intraNet, intraAddr string, intraTLS *tls.Config) error {
 	defer func() {
 		if x := recover(); x != nil {
 			Err.Printf("panic: %v", x)
@@ -39,12 +36,11 @@ func Server(ctx context.Context, domain string, publicTLS, intraTLS *tls.Config)
 	s := &server{
 		suffix:    "." + domain,
 		publicTLS: publicTLS,
-		intraTLS:  intraTLS,
 		ports:     make(map[int]map[string]func(*tls.Conn)),
 	}
 	s.cond.L = &s.mu
 
-	if err := s.serve(ctx); err != nil {
+	if err := s.serve(ctx, intraNet, intraAddr, intraTLS); err != nil {
 		Err.Printf("fatal: %v", err)
 		return err
 	}
@@ -55,19 +51,14 @@ func Server(ctx context.Context, domain string, publicTLS, intraTLS *tls.Config)
 type server struct {
 	suffix    string
 	publicTLS *tls.Config
-	intraTLS  *tls.Config
 
 	mu    sync.Mutex
 	ports map[int]map[string]func(*tls.Conn)
 	cond  sync.Cond
 }
 
-func (s *server) serve(ctx context.Context) error {
-	if err := os.MkdirAll(socketDir, 0700); err != nil {
-		return err
-	}
-
-	l, err := net.Listen("unix", socketFile)
+func (s *server) serve(ctx context.Context, intraNet, intraAddr string, intraTLS *tls.Config) error {
+	l, err := net.Listen(intraNet, intraAddr)
 	if err != nil {
 		return err
 	}
@@ -82,6 +73,11 @@ func (s *server) serve(ctx context.Context) error {
 
 	Info.Printf("running")
 	defer Info.Printf("shutdown")
+	defer daemon.SdNotify(false, daemon.SdNotifyStopping)
+
+	if _, err := daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
+		return err
+	}
 
 	for {
 		private, err := l.Accept()
@@ -94,8 +90,8 @@ func (s *server) serve(ctx context.Context) error {
 
 		Info.Printf("accepted private connection")
 
-		if s.intraTLS != nil {
-			private = tls.Server(private, s.intraTLS)
+		if intraTLS != nil {
+			private = tls.Server(private, intraTLS)
 		}
 
 		go func() {
