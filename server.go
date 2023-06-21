@@ -193,7 +193,7 @@ func (s *server) listen(port int, names map[string]func(*tls.Conn)) error {
 		c.NextProtos = nil
 	}
 
-	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	l, err := tls.Listen("tcp", fmt.Sprintf(":%d", port), c)
 	if err != nil {
 		return err
 	}
