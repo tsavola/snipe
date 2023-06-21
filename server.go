@@ -18,15 +18,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	proxyproto "github.com/pires/go-proxyproto"
 	"import.name/lock"
 )
 
 const (
 	socketDir  = "/run/snipe"
 	socketFile = socketDir + "/pipe.sock"
-
-	portOffset = 10000
 
 	publicHandshakeTimeout = time.Second * 5
 )
@@ -200,17 +197,10 @@ func (s *server) listen(port int, names map[string]func(*tls.Conn)) error {
 		c.NextProtos = nil
 	}
 
-	l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", portOffset+port))
+	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return err
 	}
-
-	l = &proxyproto.Listener{
-		Listener:          l,
-		ReadHeaderTimeout: -1,
-	}
-
-	l = tls.NewListener(l, c)
 
 	if len(c.NextProtos) == 0 {
 		Info.Printf("listening at public port %d (no ALPN)", port)
