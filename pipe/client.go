@@ -25,7 +25,13 @@ address, the private TLS name defaults to the private address.
 
 `
 
-func Main(proxyAddr string, proxyTLS *tls.Config) (exitCode int) {
+type Dialer interface {
+	Dial(network, address string) (net.Conn, error)
+}
+
+var defaultDialer net.Dialer
+
+func Main(proxyDialer Dialer, proxyAddr string, proxyTLS *tls.Config) (exitCode int) {
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 
 	flag.Usage = func() {
@@ -71,7 +77,7 @@ func Main(proxyAddr string, proxyTLS *tls.Config) (exitCode int) {
 		}
 	}
 
-	if err := Client(proxyAddr, proxyTLS, src, dest, name); err != nil {
+	if err := Client(proxyDialer, proxyAddr, proxyTLS, src, dest, name); err != nil {
 		log.Print(err)
 		return 1
 	}
@@ -79,7 +85,11 @@ func Main(proxyAddr string, proxyTLS *tls.Config) (exitCode int) {
 	return 0
 }
 
-func Client(proxyAddr string, proxyTLS *tls.Config, publicAddr, localAddr, localTLSServerName string) error {
+func Client(proxyDialer Dialer, proxyAddr string, proxyTLS *tls.Config, publicAddr, localAddr, localTLSServerName string) error {
+	if proxyDialer == nil {
+		proxyDialer = &defaultDialer
+	}
+
 	if len(publicAddr) > 255 {
 		panic(publicAddr)
 	}
@@ -99,7 +109,7 @@ func Client(proxyAddr string, proxyTLS *tls.Config, publicAddr, localAddr, local
 	var i uint64
 	for {
 		i++
-		if err := connect(i, proxyAddr, proxyTLS, request, localAddr, localTLS); err != nil {
+		if err := connect(i, proxyDialer, proxyAddr, proxyTLS, request, localAddr, localTLS); err != nil {
 			return err
 		}
 	}
@@ -107,10 +117,10 @@ func Client(proxyAddr string, proxyTLS *tls.Config, publicAddr, localAddr, local
 
 const offerTimeout = time.Second * 45
 
-func connect(num uint64, proxyAddr string, proxyTLS *tls.Config, request []byte, localAddr string, localTLS *tls.Config) error {
+func connect(num uint64, proxyDialer Dialer, proxyAddr string, proxyTLS *tls.Config, request []byte, localAddr string, localTLS *tls.Config) error {
 	log.Printf("%6d: offering", num)
 
-	proxyConn, err := net.Dial("tcp", proxyAddr)
+	proxyConn, err := proxyDialer.Dial("tcp", proxyAddr)
 	if err != nil {
 		return err
 	}
