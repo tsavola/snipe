@@ -79,11 +79,6 @@ func Main(proxyAddr string, proxyTLS *tls.Config) (exitCode int) {
 	return 0
 }
 
-type bufConn struct {
-	*bufio.Reader
-	io.Writer
-}
-
 func Client(proxyAddr string, proxyTLS *tls.Config, publicAddr, localAddr, localTLSServerName string) error {
 	if len(publicAddr) > 255 {
 		panic(publicAddr)
